@@ -20,7 +20,7 @@ function Game(debugMode, startLevel) {
 //%BONUS%
     ].filter(function (lvl) { return (lvl.indexOf('_') != 0); }); // filter out bonus levels that start with '_'
 
-	this._mod = '//%MOD%';
+    this._mod = '//%MOD%';
 
     this._viewableScripts = [
         'codeEditor.js',
@@ -58,7 +58,7 @@ function Game(debugMode, startLevel) {
 
     this._getHelpCommands = function () { return __commands; };
     this._isPlayerCodeRunning = function () { return __playerCodeRunning; };
-	this._getLocalKey = function (key) { return (this._mod.length == 0 ? '' : this._mod + '.') + key; };
+    this._getLocalKey = function (key) { return (this._mod.length == 0 ? '' : this._mod + '.') + key; };
 
     /* unexposed setters */
 
@@ -104,15 +104,6 @@ function Game(debugMode, startLevel) {
         this.map = new Map(this.display, this);
         this.objects = this.getListOfObjects();
 
-        // Initialize validator
-        this.saveReferenceImplementations(); // prevents tampering with methods
-        this._globalVars = []; // keep track of current global variables
-        for (p in window) {
-            if (window.propertyIsEnumerable(p)) {
-                this._globalVars.push(p);
-            }
-        }
-
         // Enable controls
         this.enableShortcutKeys();
         this.enableButtons();
@@ -154,9 +145,15 @@ function Game(debugMode, startLevel) {
 
     this._moveToNextLevel = function () {
         // is the player permitted to exit?
-        if (typeof this.onExit === 'function' && !this.onExit(this.map)) {
-            this.sound.playSound('blip');
-            return;
+        if (typeof this.onExit === 'function') {
+            var game = this;
+            var canExit = this.validateCallback(function () {
+                    return game.onExit(game.map);
+            });
+            if (!canExit) {
+                this.sound.playSound('blip');
+                return;
+            }
         }
 
         this.sound.playSound('complete');
@@ -285,6 +282,7 @@ function Game(debugMode, startLevel) {
     this._resetLevel = function( level ) {
         var game = this;
         var resetTimeout_msec = 2500;
+        var reset_game_msg = "To reset this level press ^4 again.";
 
         if ( this._resetTimeout != null ) {
             $('body, #buttons').css('background-color', '#000');
@@ -296,12 +294,18 @@ function Game(debugMode, startLevel) {
             } else {
                 this._getLevel(level, true);
             }
+            if(game.map._status == reset_game_msg) {
+                game.map.writeStatus("");
+            }
         } else {
-            this.display.writeStatus("To reset this level press ^4 again.");
+            this.map.writeStatus(reset_game_msg);
             $('body, #buttons').css('background-color', '#900');
 
             this._resetTimeout = setTimeout(function () {
                 game._resetTimeout = null;
+                if(game.map._status == reset_game_msg) {
+                    game.map.writeStatus("");
+                }
 
                 $('body, #buttons').css('background-color', '#000');
             }, resetTimeout_msec );
@@ -315,6 +319,7 @@ function Game(debugMode, startLevel) {
     };
 
     this._evalLevelCode = function (allCode, playerCode, isNewLevel, restartingLevelFromScript) {
+        this.map._clearIntervals();
         var game = this;
 
         // by default, get code from the editor
@@ -327,6 +332,7 @@ function Game(debugMode, startLevel) {
 
         // if we're editing a script file, do something completely different
         if (this._currentFile !== null && !restartingLevelFromScript) {
+            __currentCode = allCode;
             this.validateAndRunScript(allCode);
             return;
         }
@@ -347,7 +353,9 @@ function Game(debugMode, startLevel) {
             this.map._setProperties(this.editor.getProperties()['mapProperties']);
 
             // save editor state
-            __currentCode = allCode;
+            if (!restartingLevelFromScript) {
+                __currentCode = allCode;
+            }
             if (loadedFromEditor && !restartingLevelFromScript) {
                 this.editor.saveGoodState();
             }
@@ -365,9 +373,6 @@ function Game(debugMode, startLevel) {
             // start the level
             validatedStartLevel(this.map);
 
-            // deal with sneaky players
-            this.clearModifiedGlobals();
-
             // draw the map
             this.display.fadeIn(this.map, isNewLevel ? 100 : 10, function () {
                 game.map.refresh(); // refresh inventory display
@@ -382,7 +387,7 @@ function Game(debugMode, startLevel) {
                 // workaround because we can't use writeStatus() in startLevel()
                 // (due to the text getting overwritten by the fade-in)
                 if (game.editor.getProperties().startingMessage) {
-                    game.display.writeStatus(game.editor.getProperties().startingMessage);
+                    game.map.writeStatus(game.editor.getProperties().startingMessage);
                 }
             });
 
@@ -415,11 +420,25 @@ function Game(debugMode, startLevel) {
     this._callUnexposedMethod = function(f) {
         if (__playerCodeRunning) {
             __playerCodeRunning = false;
-            res = f();
-            __playerCodeRunning = true;
+            try {
+                res = f();
+            } finally {
+                __playerCodeRunning = true;
+            }
             return res;
         } else {
             return f();
         }
     };
+    this._checkObjective = function() {
+        if (typeof(this.objective) === 'function') {
+            var game = this;
+            var objectiveIsMet = this.validateCallback(function() {
+                return game.objective(game.map);
+            });
+            if (objectiveIsMet) {
+                this._moveToNextLevel();
+            }
+        }
+    }
 }

@@ -83,17 +83,18 @@ function Player(x, y, __map, __game) {
                 this._pickUpItem(objectName, objectDef);
             } else if (objectDef.onCollision) {
                 __game.validateCallback(function () {
-                    objectDef.onCollision(player, __game);
-                }, false, true);
+                    objectDef.onCollision(player);
+                });
             }
         }
 
         // check for collision with any lines on the map
         __map.testLineCollisions(this);
 
-        // check for nonstandard victory condition (e.g. DOM level)
-        if (typeof(__game.objective) === 'function' && __game.objective(__map)) {
-            __game._moveToNextLevel();
+        // don't run checkObjective if validation has already failed to prevent duplicate `Validation failed` errors
+        if (!__map._callbackValidationFailed) {
+            // check for nonstandard victory condition (e.g. DOM level)
+            __game._checkObjective()
         }
     };
 
@@ -109,12 +110,7 @@ function Player(x, y, __map, __game) {
 
         if (object.onPickUp) {
             __game.validateCallback(function () {
-                setTimeout(function () {
-                    object.onPickUp(player);
-                }, 100);
-                // timeout is so that written text is not immediately overwritten
-                // TODO: play around with Display.writeStatus so that this is
-                // not necessary
+                object.onPickUp(player);
             });
         }
     };
@@ -130,18 +126,21 @@ function Player(x, y, __map, __game) {
             return false;
         }
 
-        if (__map._overrideKeys[direction] && fromKeyboard) {
-            try {
-                __game.validateCallback(__map._overrideKeys[direction], true);
+        if (fromKeyboard) {
+            // clear any status text
+            __map._status = "";
+            if (__map._overrideKeys[direction]) {
+                try {
+                    __game.validateCallback(__map._overrideKeys[direction], true);
 
-                __map.refresh();
-                this._canMove = false;
-                __map._reenableMovementForPlayer(this); // (key delay can vary by map)
-                this._afterMove(__x, __y);
-            } catch (e) {
+                    __map.refresh();
+                    this._canMove = false;
+                    __map._reenableMovementForPlayer(this); // (key delay can vary by map)
+                    this._afterMove(__x, __y);
+                } catch (e) {
+                }
+                return;
             }
-
-            return;
         }
 
         var new__x;
@@ -210,5 +209,8 @@ function Player(x, y, __map, __game) {
     this.setPhoneCallback = wrapExposedMethod(function(func) {
         this._phoneFunc = func;
     }, this);
-    
+
+    // call secureObject to prevent user code from tampering with private attributes
+    __game.secureObject(this,"player");
+
 }

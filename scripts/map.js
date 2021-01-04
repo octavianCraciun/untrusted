@@ -56,7 +56,14 @@ function Map(display, __game) {
 
     /* exposed getters */
 
-    this.getDynamicObjects = function () { return __dynamicObjects; };
+    this.getDynamicObjects = function () {
+        // copy dynamic object list to fix issue#166
+        var copy = [];
+        for (var i = 0; i < __dynamicObjects.length; i++) {
+            copy[i] = __dynamicObjects[i];
+        }
+        return copy;
+    };
     this.getPlayer = function () { return __player; };
     this.getWidth = function () { return __game._dimensions.width; };
     this.getHeight = function () { return __game._dimensions.height; };
@@ -83,12 +90,7 @@ function Map(display, __game) {
         });
         __dynamicObjects = [];
         __player = null;
-
-        for (var i = 0; i < __intervals.length; i++) {
-            clearInterval(__intervals[i]);
-        }
-        __intervals = [];
-
+        this._clearIntervals();
         __lines = [];
         __dom = '';
         this._overrideKeys = {};
@@ -101,28 +103,28 @@ function Map(display, __game) {
         this.finalLevel = false;
         this._callbackValidationFailed = false;
     };
+    this._clearIntervals = function() {
+        if (__game._isPlayerCodeRunning()) { throw 'Forbidden method call: map._clearIntervals()';}
+        for (var i = 0; i < __intervals.length; i++) {
+            clearInterval(__intervals[i]);
+        }
+        __intervals = [];
+    };
 
     this._ready = function () {
         if (__game._isPlayerCodeRunning()) { throw 'Forbidden method call: map._ready()';}
 
-        var map = this;
-
         // set refresh rate if one is specified
         if (__refreshRate) {
-            map.startTimer(function () {
+            // wrapExposedMethod is necessary here to prevent the `_moveToNextLevel`
+            // call from breaking
+            this.startTimer(wrapExposedMethod(function () {
                 // refresh the map
-                map.refresh();
-
-                // rewrite status
-                if (map._status) {
-                    map.writeStatus(map._status);
-                }
+                this.refresh();
 
                 // check for nonstandard victory condition
-                if (typeof(__game.objective) === 'function' && __game.objective(map)) {
-                    __game._moveToNextLevel();
-                }
-            }, __refreshRate);
+                 __game._checkObjective()
+            }, this), __refreshRate);
         }
     };
 
@@ -171,13 +173,9 @@ function Map(display, __game) {
                 return true;
             } else if (typeof object.impassable === 'function') {
                 // the obstacle is impassable only in certain circumstances
-                try {
-                    return this._validateCallback(function () {
-                        return !object.impassable(__player, object);
-                    });
-                } catch (e) {
-                    display.writeStatus(e.toString());
-                }
+                return this._validateCallback(function () {
+                    return !object.impassable(__player, object);
+                });
             } else {
                 // the obstacle is always impassable
                 return false;
@@ -207,8 +205,8 @@ function Map(display, __game) {
         }
 
         // look for dynamic objects
-        for (var i = 0; i < this.getDynamicObjects().length; i++) {
-            var object = this.getDynamicObjects()[i];
+        for (var i = 0; i < __dynamicObjects.length; i++) {
+            var object = __dynamicObjects[i];
             if (object.getType() === type) {
                 foundObjects.push({x: object.getX(), y: object.getY()});
             }
@@ -241,8 +239,8 @@ function Map(display, __game) {
 
         var x = Math.floor(x); var y = Math.floor(y);
 
-        for (var i = 0; i < this.getDynamicObjects().length; i++) {
-            var object = this.getDynamicObjects()[i];
+        for (var i = 0; i < __dynamicObjects.length; i++) {
+            var object = __dynamicObjects[i];
             if (object.getX() === x && object.getY() === y) {
                 return true;
             }
@@ -255,8 +253,8 @@ function Map(display, __game) {
 
         var x = Math.floor(x); var y = Math.floor(y);
 
-        for (var i = 0; i < this.getDynamicObjects().length; i++) {
-            var object = this.getDynamicObjects()[i];
+        for (var i = 0; i < __dynamicObjects.length; i++) {
+            var object = __dynamicObjects[i];
             if (object.getX() === x && object.getY() === y) {
                 return object;
             }
@@ -273,14 +271,14 @@ function Map(display, __game) {
         // TODO: make this not be the case
 
         // "move" teleporters
-        this.getDynamicObjects().filter(function (object) {
+        __dynamicObjects.filter(function (object) {
             return (object.getType() === 'teleporter');
         }).forEach(function(object) {
             object._onTurn();
         });
 
         // move everything else
-        this.getDynamicObjects().filter(function (object) {
+        __dynamicObjects.filter(function (object) {
             return (object.getType() !== 'teleporter');
         }).forEach(function(object) {
             object._onTurn();
@@ -319,9 +317,6 @@ function Map(display, __game) {
         __chapterHideTimeout = setTimeout(function () {
             $('#chapter').fadeOut(1000);
         }, $('#chapter').hasClass('death') ? 2500 : 0);
-
-        // also, clear any status text if map is refreshing automatically (e.g. boss level)
-        this._status = '';
     };
 
     this._refreshDynamicObjects = function() {
@@ -373,6 +368,10 @@ function Map(display, __game) {
         } else {
             this._display.drawAll(this);
         }
+        // rewrite any status messages
+        if (this._status) {
+            this._display.writeStatus(this._status);
+        }
         __game.drawInventory();
     }, this);
 
@@ -389,7 +388,7 @@ function Map(display, __game) {
         }
 
         // count dynamic objects
-        this.getDynamicObjects().forEach(function (obj) {
+        __dynamicObjects.forEach(function (obj) {
             if (obj.getType() === type) {
                 count++;
             }
@@ -403,6 +402,10 @@ function Map(display, __game) {
 
         if (!__objectDefinitions[type]) {
             throw "There is no type of object named " + type + "!";
+        }
+        var minLevel = __objectDefinitions[type].minimumLevel
+        if (minLevel && __game._currentLevel < minLevel) {
+            throw type.capitalize() + "s are not available until level " + minLevel;
         }
 
         if (__player && x == __player.getX() && y == __player.getY()) {
@@ -517,8 +520,8 @@ function Map(display, __game) {
         } else if (delay < 25) {
             throw "startTimer(): minimum delay is 25 milliseconds";
         }
-
-        __intervals.push(setInterval(timer, delay));
+        var validate = this._validateCallback;
+        __intervals.push(setInterval(function(){validate(timer)}, delay));
     }, this);
 
     this.timeout = wrapExposedMethod(function(timer, delay) {
@@ -527,8 +530,8 @@ function Map(display, __game) {
         } else if (delay < 25) {
             throw "timeout(): minimum delay is 25 milliseconds";
         }
-
-        __intervals.push(setTimeout(timer, delay));
+        var validate = this._validateCallback;
+        __intervals.push(setTimeout(function(){validate(timer)}, delay));
     }, this);
 
     this.displayChapter = wrapExposedMethod(function(chapterName, cssClass) {
@@ -549,17 +552,13 @@ function Map(display, __game) {
     }, this);
 
     this.writeStatus = wrapExposedMethod(function(status) {
-        this._status = status;
-
-        if (__refreshRate) {
-            // write the status immediately
-            display.writeStatus(status);
-        } else {
-            // wait 100 ms for redraw reasons
-            setTimeout(function () {
-                display.writeStatus(status);
-            }, 100);
+        if (this._status) {
+            // refresh to hide the old status message
+            this._status = "";
+            this.refresh();
         }
+        this._status = status;
+        this._display.writeStatus(status);
     }, this);
 
     // used by validators
@@ -572,14 +571,28 @@ function Map(display, __game) {
     /* canvas-related stuff */
 
     this.getCanvasContext = wrapExposedMethod(function() {
-        return $('#drawingCanvas')[0].getContext('2d');
+        var ctx = $('#drawingCanvas')[0].getContext('2d');
+        if(!this._dummy) {
+            var opts = this._display.getOptions();
+            ctx.font = opts.fontSize+"px " +opts.fontFamily;
+        }
+        return ctx;
     }, this);
 
-    this.getCanvasCoords = wrapExposedMethod(function(obj) {
+    this.getCanvasCoords = wrapExposedMethod(function() {
+        var x, y;
+        if(arguments.length == 1) {
+            var obj = arguments[0];
+            x = obj.getX();
+            y = obj.getY();
+        } else {
+            x = arguments[0];
+            y = arguments[1];
+        }
         var canvas =  $('#drawingCanvas')[0];
         return {
-            x: (obj.getX() + 0.5) * canvas.width / __game._dimensions.width,
-            y: (obj.getY() + 0.5) * canvas.height / __game._dimensions.height
+            x: (x + 0.5) * canvas.width / __game._dimensions.width,
+            y: (y + 0.5) * canvas.height / __game._dimensions.height
         };
     }, this);
 
@@ -608,7 +621,9 @@ function Map(display, __game) {
             if (pDistance(playerCoords.x, playerCoords.y,
                     line.start[0], line.start[1],
                     line.end[0], line.end[1]) < threshold) {
-                line.callback(__player);
+                __game.validateCallback(function() {
+                        line.callback(__player);
+                });
             }
         })
     }, this);
@@ -678,4 +693,7 @@ function Map(display, __game) {
     /* initialization */
 
     this._reset();
+
+    // call secureObject to prevent user code from tampering with private attributes
+    __game.secureObject(this, "map");
 }

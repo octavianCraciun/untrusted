@@ -2,8 +2,8 @@
 Objects can have the following parameters:
     color: '#fff' by default
     impassable: true if it blocks the player from movement (false by default)
-    onCollision: function (player, game) called when player moves over the object
-    onPickUp: function (player, game) called when player picks up the item
+    onCollision: function (player) called when player moves over the object
+    onPickUp: function (player) called when player picks up the item
     symbol: Unicode character representing the object
     type: 'item' or null
 */
@@ -60,13 +60,13 @@ function followAndKeepDistance(obj, type) {
 }
 
 // used by bonus levels 01 through 04
-function killPlayerIfTooFar(obj) {
+function killPlayerIfTooFar(obj, map) {
     var target = obj.findNearest('player');
     var leftDist = obj.getX() - target.x;
     var upDist = obj.getY() - target.y;
 
     if (Math.abs(upDist) > 8 || Math.abs(leftDist) > 8) {
-        obj._map.getPlayer().killedBy('"suspicious circumstances"');
+        map.getPlayer().killedBy('"suspicious circumstances"');
     }
 }
 
@@ -90,7 +90,9 @@ Game.prototype.getListOfObjects = function () {
             'color': '#0ff',
             'onCollision': function (player) {
                 if (!game.map.finalLevel) {
-                    game._moveToNextLevel();
+                    game._callUnexposedMethod(function () {
+                        game._moveToNextLevel();
+                    });
                 }
             }
         },
@@ -163,6 +165,7 @@ Game.prototype.getListOfObjects = function () {
 
         'phone': {
             'type': 'item',
+            'minimumLevel': 7,
             'symbol': String.fromCharCode(0x260E), // ☎
             'onPickUp': function (player) {
                 game.map.writeStatus('You have picked up the function phone!');
@@ -175,6 +178,7 @@ Game.prototype.getListOfObjects = function () {
 
         'redKey': {
             'type': 'item',
+            'minimumLevel': 11,
             'symbol': 'k',
             'color': 'red',
             'onPickUp': function (player) {
@@ -184,6 +188,7 @@ Game.prototype.getListOfObjects = function () {
 
         'greenKey': {
             'type': 'item',
+            'minimumLevel': 12,
             'symbol': 'k',
             'color': '#0f0',
             'onPickUp': function (player) {
@@ -193,6 +198,7 @@ Game.prototype.getListOfObjects = function () {
 
         'blueKey': {
             'type': 'item',
+            'minimumLevel': 13,
             'symbol': 'k',
             'color': '#06f',
             'onPickUp': function (player) {
@@ -202,6 +208,7 @@ Game.prototype.getListOfObjects = function () {
 
         'yellowKey': {
             'type': 'item',
+            'minimumLevel': 14,
             'symbol': 'k',
             'color': 'yellow',
             'onPickUp': function (player) {
@@ -210,6 +217,7 @@ Game.prototype.getListOfObjects = function () {
         },
 
         'theAlgorithm': {
+            'minimumLevel': 14,
             'type': 'item',
             'symbol': 'A',
             'color': 'white',
@@ -228,7 +236,7 @@ Game.prototype.getListOfObjects = function () {
             'color': 'red',
             'behavior': function (me) {
                 followAndKeepDistance(me, 'player');
-                killPlayerIfTooFar(me);
+                killPlayerIfTooFar(me, game.map);
             },
             'onCollision': function (player) {
                 player.killedBy('"the eye"');
